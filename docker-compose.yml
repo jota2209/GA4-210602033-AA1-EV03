@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: springvalley_dw_db
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_NON_ROOT_USER: ${POSTGRES_NON_ROOT_USER}
+      POSTGRES_NON_ROOT_PASSWORD: ${POSTGRES_NON_ROOT_PASSWORD}
+      ANALYTICS_USER: ${ANALYTICS_USER}
+      ANALYTICS_PASSWORD: ${ANALYTICS_PASSWORD}
+      TIMEZONE: ${TIMEZONE}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - dw_storage_springvalley:/var/lib/postgresql
+      - ./initdb/:/docker-entrypoint-initdb.d/
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dw_network
+
+networks:
+  dw_network:
+    driver: bridge
+
+volumes:
+  dw_storage_springvalley:
+    name: dw_storage_springvalley

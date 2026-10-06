@@ -1,0 +1,30 @@
+\section{Metodología}
+Para el diseño de la solución analítica se evaluaron los dos grandes paradigmas de Data Warehousing: la arquitectura de Arriba hacia Abajo (Top-Down) propuesta por Bill Inmon y la arquitectura Bottom-Up basada en el Modelo Dimensional propuesta por Ralph Kimball. Para el proyecto \textbf{Spring Valley} se seleccionó la metodología de Kimball por las siguientes razones tácticas:
+\begin{itemize}
+	\item \textbf{Orientación a Procesos de Negocio:} Permite construir Data Marts iterativos centrados en casos de uso específicos (ej. gestión de incidentes) entregando valor al negocio a corto plazo.
+	\item \textbf{Rendimiento de Consultas OLAP:} La estructura en estrella simplifica las uniones de tablas (JOINs), mejorando drásticamente el tiempo de respuesta frente a los modelos altamente normalizados en 3NF de Inmon.
+	\item \textbf{•	Facilidad de Adopción en Herramientas de BI:} Las herramientas modernas como Power BI están optimizadas de forma nativa para consumir esquemas dimensionales en estrella.
+\end{itemize}
+
+\subsection{Planificación del proyecto}
+De acuerdo con la metodología del Ciclo de Vida del Negocio de Ralph Kimball (Kimball's Business Lifecycle), el proyecto se estructura en un cronograma estimado de 12 semanas de desarrollo divididas en 5 fases principales:
+\begin{table}[H]
+	\caption{Cronograma de Implementación de la Bodega de Datos según la Metodología Kimball}
+	\label{tab:cronograma_kimball}
+	\addtocounter{table}{-1}
+	\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}p{3.5cm} >{\raggedright\arraybackslash}X >{\centering\arraybackslash}p{3.5cm}}
+		\toprule
+		\textbf{Fase Kimball} & \textbf{Actividades Principales} & \textbf{Duración / Semanas} \\
+		\midrule
+		Fase 1: Planificación & Definición del alcance, evaluación de viabilidad técnica y conformación del equipo de desarrollo. & Semanas 1 - 2 \\
+		\addlinespace
+		Fase 2: Requerimientos & Entrevistas con gerencia de operaciones, identificación de KPI y matriz de procesos de negocio. & Semanas 3 - 4 \\
+		\addlinespace
+		Fase 3: Diseño Dimensional & Selección de la granularidad, identificación de dimensiones y tabla de hechos (Star Schema). & Semanas 5 - 7 \\
+		\addlinespace
+		Fase 4: Desarrollo ETL \& DW & Despliegue de PostgreSQL en Docker, scripts de extracción y carga masiva con Python. & Semanas 8 - 10 \\
+		\addlinespace
+		Fase 5: Despliegue \& BI & Construcción de dashboards en Power BI, pruebas de aceptación y capacitación a usuarios. & Semanas 11 - 12 \\
+		\bottomrule
+	\end{tabularx}
+\end{table}

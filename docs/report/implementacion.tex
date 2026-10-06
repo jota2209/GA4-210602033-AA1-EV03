@@ -1,0 +1,99 @@
+\section{Implementación}
+Para garantizar que la bodega de datos de Spring Valley sea robusta, escalable y mantenible a lo largo del tiempo, se seleccionó un ecosistema tecnológico basado en estándares abiertos de la industria, virtualización ligera mediante contenedores y automatización declarativa de infraestructura. Esta aproximación minimiza la deuda técnica, desacopla el entorno analítico de las dependencias del sistema operativo anfitrión y asegura la consistencia de los datos en todas las fases del ciclo de vida del proyecto.
+
+\subsection{Stack Tecnológico y Justificación de Componentes}
+El diseño de la solución integra cuatro componentes principales:
+\begin{itemize}
+	\item \textbf{Motor de Base de Datos (PostgreSQL 18-alpine):} Se seleccionó la versión 18 sobre la distribución minimalista Alpine Linux. PostgreSQL es reconocido por su robustez en el cumplimiento de estándares ACID, su optimización para operaciones OLAP complejas (ejecución de uniones de tablas mediante Hash Joins, escaneos paralelos y soporte de funciones de ventana analíticas) y su eficiencia en el consumo de memoria volátil y espacio en disco. El uso de la variante Alpine permite obtener una imagen ligera (inferior a 100 MB), lo que reduce la superficie de vulnerabilidades de seguridad y optimiza los tiempos de despliegue. Al implementar un modelo dimensional basado estrictamente en tipos de datos relacionales estándar y claves subrogadas numéricas (\texttt{INT}, \texttt{BIGINT GENERATED ALWAYS AS IDENTITY}), el motor opera de manera nativa sin requerir extensiones criptográficas o generadoras de UUID externas, reduciendo la sobrecarga en el catálogo del sistema.
+	\item \textbf{Cliente de Administración y Modelado Visual (pgAdmin 4):} Se incorpora pgAdmin 4 como herramienta cliente especializada para la gestión administrativa, monitorización de sesiones y generación visual del Diagrama Entidad-Relación (ERD) a partir del catálogo de metadatos de la base de datos. Esto facilita la inspección de claves primarias, claves foráneas, restricciones de unicidad e índices creados en el esquema dimensional.
+	\item \textbf{Plataforma de Contenerización y Orquestación (Docker \& Docker Compose):} La implementación se articula mediante Docker, permitiendo encapsular el motor de bases de datos junto con sus variables de entorno, redes virtuales y reglas de persistencia. Con Docker Compose, la infraestructura se describe como código (IaC), permitiendo aprovisionar el entorno completo mediante un único comando (\texttt{docker compose up -d}) con garantías de portabilidad en entornos de desarrollo, pruebas y producción.
+	\item \textbf{Automatización con Script Bash (01-init-data.sh):} La inicialización del sistema se delega a un script en Bash montado en el directorio \texttt{/docker-entrypoint-initdb.d/} del contenedor. Este script orquesta de forma desatendida la configuración del huso horario (\texttt{America/Bogota}), la creación granular de usuarios y asignación de esquemas, la ejecución de sentencias DDL para construir el esquema en estrella, la generación de índices B-Tree y la carga de datos semilla para calibración inmediata.
+\end{itemize}
+
+\subsection{Seguridad, Gobierno de Datos y Segregación Granular de Privilegios}
+La seguridad en una bodega de datos corporativa trasciende la simple protección de acceso al servidor; exige aplicar el Principio de Menor Privilegio (\textit{Principle of Least Privilege - PoLP}) y la Separación de Responsabilidades (\textit{Separation of Concerns}). Conectar herramientas externas o pipelines masivos utilizando la cuenta de superusuario (\texttt{postgres\_admin}) representa un riesgo crítico de seguridad y estabilidad operativa. Para mitigar estas vulnerabilidades, se implementó una arquitectura de usuarios con permisos granulares:
+
+\begin{itemize}
+	\item \textbf{Superadministrador del Motor (postgres\_admin):}
+	\begin{itemize}
+		\item \textit{Alcance:} Exclusivo para tareas de mantenimiento a nivel de clúster, configuración interna del motor y gestión global del RDBMS.
+		\item \textit{Restricción:} Queda estrictamente aislado y fuera del alcance de las conexiones operativas de pipelines o aplicaciones cliente.
+	\end{itemize}
+	
+	\item \textbf{Usuario de Ingesta y Mantenimiento Dimensional (springvalley\_etl):}
+	\begin{itemize}
+		\item \textit{Alcance:} Rol no-root configurado como propietario (\textit{owner}) de las tablas dimensionales y de hechos. Cuenta con permisos DDL y DML (\texttt{CREATE}, \texttt{SELECT}, \texttt{INSERT}, \texttt{UPDATE}, \texttt{DELETE}) en el esquema \texttt{public}, además del control de secuencias numéricas.
+		\item \textit{Propósito:} Ejecutar las transformaciones masivas de datos, inserción de nuevos registros y control de cambios dimensionales (SCD) sin acceso a privilegios administrativos del clúster.
+	\end{itemize}
+	
+	\item \textbf{Usuario Analítico de Reportes y BI (springvalley\_bi):}
+	\begin{itemize}
+		\item \textit{Alcance:} Rol de \textbf{solo lectura} estricto (\texttt{SELECT} únicamente sobre las tablas del esquema \texttt{public}).
+		\item \textit{Propósito:} Destinado al consumo de datos desde plataformas de visualización (Power BI, Apache Superset) y herramientas de consulta exploratoria (pgAdmin, DBeaver). Al carecer por completo de permisos de modificación (\texttt{INSERT}, \texttt{UPDATE}, \texttt{DELETE}, \texttt{DROP}), se garantiza que ninguna consulta analítica mal optimizada, fallo de usuario final o intento de inyección SQL pueda alterar o comprometer la integridad de la base de datos histórica.
+	\end{itemize}
+\end{itemize}
+
+\subsection{Reducción de Fricción Operativa mediante Bash Scripting}
+La adopción de scripts Bash (\texttt{01-init-data.sh}) integrados en el flujo de inicialización de Docker resuelve uno de los principales problemas en la ingeniería de datos: el desfase de configuración (\textit{configuration drift}) y la fricción del despliegue manual. Sus ventajas clave radican en:
+
+\begin{itemize}
+	\item \textbf{Eliminación del Factor de Error Humano:} Al automatizar la sintaxis SQL, la creación de tipos de datos, restricciones foráneas y sentencias de concesión de privilegios (\texttt{GRANT}), se evita que configuraciones incompletas o errores de tipeo manual generen fallos durante la puesta en marcha.
+	\item \textbf{Idempotencia y Reproducibilidad Garantizada:} El script incorpora directivas de control y estructuras defensivas (\texttt{IF NOT EXISTS}, \texttt{ON CONFLICT DO NOTHING}), lo que permite que el entorno sea recreado exactamente con las mismas características en cualquier máquina de desarrollo, servidor local o nube en cuestión de segundos.
+	\item \textbf{Despliegue Desatendido (Zero-Touch Provisioning):} El equipo de ingeniería no requiere interactuar interactivamente con la terminal de PostgreSQL (\texttt{psql}) para configurar la base de datos inicial. Al ejecutar \texttt{docker compose up -d}, el contenedor procesa de forma transparente el script, dejando el Data Warehouse operativo, seguro y con datos de calibración listos para el consumo analítico.
+\end{itemize}
+
+\subsection{Requerimientos de Infraestructura (Hardware y Software)}
+Con el fin de soportar adecuadamente el pipeline de consolidación de datos y las consultas concurrentes sobre el esquema de ventas de Spring Valley, se dimensionan los siguientes requerimientos de plataforma estructurados mediante tablas formales (véanse la Tabla \ref{tab:hardware_req} y la Tabla \ref{tab:software_req}). 
+
+% NOTA: Asegúrate de tener \usepackage{pdflscape} en tu preámbulo para que este entorno funcione.
+\begin{landscape}
+	
+	\subsubsection{Requerimientos de Hardware}
+	
+	\begingroup
+	\captionof{table}{Dimensionamiento de Hardware para la Bodega de Datos}
+	\label{tab:hardware_req}
+	\addtocounter{table}{-1}
+	\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash\hsize=0.8\hsize}X >{\raggedright\arraybackslash\hsize=1.0\hsize}X >{\raggedright\arraybackslash\hsize=1.0\hsize}X >{\raggedright\arraybackslash\hsize=1.2\hsize}X}
+		\toprule
+		\textbf{Componente} & \textbf{Especificación Mínima (Desarrollo / PoC)} & \textbf{Especificación Recomendada (Producción)} & \textbf{Justificación Técnica} \\
+		\midrule
+		\textbf{Procesador (CPU)} & 2 Núcleos x86\_64 / ARM64 (2.0 GHz) & 4 a 8 Núcleos x86\_64 (3.0 GHz o superior) & Permite la ejecución de planes paralelos (\textit{Parallel Query Workers}) en escaneos masivos de tablas de hechos. \\
+		\addlinespace
+		\textbf{Memoria RAM} & 4 GB & 16 GB a 32 GB & Fundamental para alojar el \texttt{shared\_buffers} de PostgreSQL, el espacio de trabajo de agregación (\texttt{work\_mem}) y la caché de lectura del SO. \\
+		\addlinespace
+		\textbf{Almacenamiento} & 20 GB SSD SATA & 100 GB a 500 GB SSD NVMe & Los entornos analíticos demandan altas tasas de IOPS y throughput sostenido para escrituras masivas en procesos ETL y escaneos de disco. \\
+		\addlinespace
+		\textbf{Interfaz de Red} & 100 Mbps Ethernet / Wi-Fi & 1 Gbps a 10 Gbps Full Duplex & Minimiza la latencia de transferencia en la extracción masiva de datos transaccionales y la conexión de clientes BI concurrentes. \\
+		\bottomrule
+	\end{tabularx}
+	\endgroup
+	
+	\vfill % Distribuye dinámicamente el espacio restante para evitar que la página se desborde o se cree una hoja en blanco
+	
+	\subsubsection{Requerimientos de Software}
+	
+	\begingroup
+	\captionof{table}{Matriz de Software y Herramientas Tecnológicas}
+	\label{tab:software_req}
+	\addtocounter{table}{-1}
+	\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash\hsize=0.7\hsize}X >{\raggedright\arraybackslash\hsize=1.2\hsize}X >{\raggedright\arraybackslash\hsize=0.7\hsize}X >{\raggedright\arraybackslash\hsize=1.4\hsize}X}
+		\toprule
+		\textbf{Categoría} & \textbf{Herramienta / Tecnología} & \textbf{Versión Soportada} & \textbf{Propósito en la Solución} \\
+		\midrule
+		\textbf{Sistema Operativo} & Linux (Ubuntu Server 22.04 LTS / Debian 12), Windows 11 Pro con WSL2 o macOS & Kernel 5.15 o superior & Soporte nativo de contenedores y gestión avanzada de hilos de CPU. \\
+		\addlinespace
+		\textbf{Container Engine} & Docker Engine \& Docker CLI & 24.0.0 o superior & Runtime de contenedores, gestión de redes tipo \textit{bridge} y control de volúmenes persistentes. \\
+		\addlinespace
+		\textbf{Orquestación Local} & Docker Compose & 2.20.0 o superior & Despliegue declarativo de servicios, mapeo de puertos y gestión de variables de entorno (\texttt{.env}). \\
+		\addlinespace
+		\textbf{Motor RDBMS} & PostgreSQL (Official Alpine Image) & 18.x-alpine & Motor relacional central para alojar la bodega de datos multidimensional. \\
+		\addlinespace
+		\textbf{Herramientas Cliente} & pgAdmin 4 / DBeaver Community / psql CLI & pgAdmin v8.x / DBeaver v24.x & Administración, monitoreo, afinamiento de consultas (\texttt{EXPLAIN ANALYZE}) y diagramado ER. \\
+		\addlinespace
+		\textbf{Intérprete} & GNU Bash & 5.0 o superior & Ejecución de pipelines de inicialización y utilitarios de mantenimiento. \\
+		\bottomrule
+	\end{tabularx}
+	\endgroup
+	
+\end{landscape}
